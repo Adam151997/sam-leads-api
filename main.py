@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="SAM Business Database API",
     description="Complete US Business Database with 1.4M+ Records - Premium Data Access",
-    version="6.0.0"
+    version="6.0.1"
 )
 
 app.add_middleware(
@@ -51,37 +51,6 @@ def validate_api_key(credentials: HTTPAuthorizationCredentials = Depends(securit
         return api_key
     raise HTTPException(status_code=401, detail="Invalid API key.")
 
-@app.post("/admin/generate-key")
-async def generate_api_key(
-    customer_name: str = Query(..., description="Customer name for this key"),
-    plan_type: str = Query("premium", description="Plan type: premium, enterprise"),
-    days_valid: int = Query(365, description="Days until key expires"),
-    admin_secret: str = Query(..., description="Admin password for security")
-):
-    if admin_secret != "your_secure_admin_password_here_2024":
-        raise HTTPException(status_code=401, detail="Invalid admin secret")
-    
-    new_key = f"sam_{secrets.token_urlsafe(24)}"
-    expiry_date = (datetime.datetime.now() + datetime.timedelta(days=days_valid)).strftime("%Y-%m-%d")
-    
-    VALID_API_KEYS[new_key] = {
-        "plan": plan_type,
-        "active": True,
-        "customer": customer_name,
-        "created": datetime.datetime.now().strftime("%Y-%m-%d"),
-        "expires": expiry_date,
-        "notes": f"Generated for {customer_name} on {datetime.datetime.now().strftime('%Y-%m-%d')}"
-    }
-    
-    return {
-        "success": True,
-        "api_key": new_key,
-        "customer": customer_name,
-        "plan_type": plan_type,
-        "expires_at": expiry_date,
-        "message": "API key generated successfully."
-    }
-
 # =============================================
 # DATABASE CONNECTION
 # =============================================
@@ -91,15 +60,15 @@ def get_db_connection():
     return psycopg2.connect(database_url, cursor_factory=RealDictCursor)
 
 # =============================================
-# COLUMN DEFINITIONS - USING YOUR EXACT SCHEMA
+# SAFE COLUMN DEFINITIONS - ONLY COLUMNS THAT EXIST
 # =============================================
 
 def get_public_fields():
-    """Public fields - basic business info"""
+    """Public fields - ONLY columns that definitely exist"""
     return [
         "UNIQUE_ENTITY_IDENTIFIER_SAM",
         "LEGAL_BUSINESS_NAME", 
-        "DBA_NAME",
+        # REMOVED: "DBA_NAME" - doesn't exist in live DB
         "PHYSICAL_ADDRESS_CITY", 
         "PHYSICAL_ADDRESS_PROVINCE_OR_STATE", 
         "PHYSICAL_ADDRESS_ZIPPOSTAL_CODE",
@@ -109,35 +78,28 @@ def get_public_fields():
     ]
 
 def get_premium_fields():
-    """All fields including sensitive contact information"""
+    """Premium fields - ONLY columns that definitely exist"""
     return [
         "UNIQUE_ENTITY_IDENTIFIER_SAM",
-        "UNIQUE_ENTITY_IDENTIFIER_DUNS",
         "LEGAL_BUSINESS_NAME", 
-        "DBA_NAME",
-        "PHYSICAL_ADDRESS_LINE_1",
-        "PHYSICAL_ADDRESS_LINE_2",
         "PHYSICAL_ADDRESS_CITY", 
         "PHYSICAL_ADDRESS_PROVINCE_OR_STATE", 
         "PHYSICAL_ADDRESS_ZIPPOSTAL_CODE",
-        "PHYSICAL_ADDRESS_COUNTRY_CODE",
-        "GOVT_BUS_POC_FIRST_NAME",
-        "GOVT_BUS_POC_LAST_NAME",
-        "GOVT_BUS_POC_TITLE",
         "PRIMARY_NAICS",
         "BUS_TYPE_STRING",
         "ENTITY_STRUCTURE"
+        # Note: Removed DUNS, contact info until we verify they exist
     ]
 
 # =============================================
-# API ENDPOINTS
+# API ENDPOINTS - USING ONLY SAFE COLUMNS
 # =============================================
 
 @app.get("/")
 async def root():
     return {
         "message": "SAM Business Database API",
-        "version": "6.0.0",
+        "version": "6.0.1",
         "records": "1.4M+ US Businesses",
         "status": "operational",
         "database": "Connected to PostgreSQL",
@@ -145,10 +107,6 @@ async def root():
             "search": "/search?q=company+name",
             "leads": "/leads?state=CA&city=Los+Angeles",
             "business_detail": "/business/{sam_id}",
-            "premium_search": "/search/premium?q=company (requires API key)",
-            "premium_leads": "/leads/premium?state=CA (requires API key)",
-            "premium_detail": "/business/{sam_id}/premium (requires API key)",
-            "export": "/export/csv (requires API key)",
             "stats": "/stats"
         }
     }
@@ -157,7 +115,7 @@ async def root():
 async def health_check():
     return {"status": "healthy", "timestamp": datetime.datetime.now().isoformat()}
 
-# PUBLIC SEARCH - Basic fields only
+# PUBLIC SEARCH - Only safe columns
 @app.get("/search")
 async def search_businesses(
     q: str = Query(None, description="Search term"),
@@ -174,18 +132,18 @@ async def search_businesses(
         select_clause = ", ".join([f'"{field}"' for field in public_fields])
         
         if q:
+            # SIMPLIFIED SEARCH - Only using columns that definitely exist
             search_query = f"""
                 SELECT {select_clause} 
                 FROM businesses 
                 WHERE "LEGAL_BUSINESS_NAME" ILIKE %s 
-                   OR "DBA_NAME" ILIKE %s 
                    OR "PHYSICAL_ADDRESS_CITY" ILIKE %s 
                    OR "PHYSICAL_ADDRESS_PROVINCE_OR_STATE" ILIKE %s
                 ORDER BY "LEGAL_BUSINESS_NAME" 
                 LIMIT %s OFFSET %s
             """
             search_pattern = f"%{q}%"
-            params = [search_pattern] * 4 + [limit, offset]
+            params = [search_pattern] * 3 + [limit, offset]
         else:
             search_query = f"""
                 SELECT {select_clause} 
@@ -204,11 +162,10 @@ async def search_businesses(
                 SELECT COUNT(*) 
                 FROM businesses 
                 WHERE "LEGAL_BUSINESS_NAME" ILIKE %s 
-                   OR "DBA_NAME" ILIKE %s 
                    OR "PHYSICAL_ADDRESS_CITY" ILIKE %s 
                    OR "PHYSICAL_ADDRESS_PROVINCE_OR_STATE" ILIKE %s
             """
-            count_params = [search_pattern] * 4
+            count_params = [search_pattern] * 3
         else:
             count_query = "SELECT COUNT(*) FROM businesses"
             count_params = []
@@ -231,87 +188,6 @@ async def search_businesses(
         
     except Exception as e:
         logger.error(f"Search error: {e}")
-        return {"success": False, "error": str(e)}
-
-# PREMIUM SEARCH - All fields including contact info
-@app.get("/search/premium")
-async def search_businesses_premium(
-    q: str = Query(None, description="Search term"),
-    page: int = Query(1, ge=1),
-    limit: int = Query(50, ge=1, le=1000),
-    api_key: str = Depends(validate_api_key)
-):
-    """Search businesses with full contact information (Premium Tier)"""
-    try:
-        offset = (page - 1) * limit
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        premium_fields = get_premium_fields()
-        select_clause = ", ".join([f'"{field}"' for field in premium_fields])
-        
-        if q:
-            search_query = f"""
-                SELECT {select_clause} 
-                FROM businesses 
-                WHERE "LEGAL_BUSINESS_NAME" ILIKE %s 
-                   OR "DBA_NAME" ILIKE %s 
-                   OR "PHYSICAL_ADDRESS_CITY" ILIKE %s 
-                   OR "PHYSICAL_ADDRESS_PROVINCE_OR_STATE" ILIKE %s
-                   OR "GOVT_BUS_POC_FIRST_NAME" ILIKE %s
-                   OR "GOVT_BUS_POC_LAST_NAME" ILIKE %s
-                ORDER BY "LEGAL_BUSINESS_NAME" 
-                LIMIT %s OFFSET %s
-            """
-            search_pattern = f"%{q}%"
-            params = [search_pattern] * 6 + [limit, offset]
-        else:
-            search_query = f"""
-                SELECT {select_clause} 
-                FROM businesses 
-                ORDER BY "LEGAL_BUSINESS_NAME" 
-                LIMIT %s OFFSET %s
-            """
-            params = [limit, offset]
-        
-        cursor.execute(search_query, params)
-        results = cursor.fetchall()
-        
-        # Get total count
-        if q:
-            count_query = """
-                SELECT COUNT(*) 
-                FROM businesses 
-                WHERE "LEGAL_BUSINESS_NAME" ILIKE %s 
-                   OR "DBA_NAME" ILIKE %s 
-                   OR "PHYSICAL_ADDRESS_CITY" ILIKE %s 
-                   OR "PHYSICAL_ADDRESS_PROVINCE_OR_STATE" ILIKE %s
-                   OR "GOVT_BUS_POC_FIRST_NAME" ILIKE %s
-                   OR "GOVT_BUS_POC_LAST_NAME" ILIKE %s
-            """
-            count_params = [search_pattern] * 6
-        else:
-            count_query = "SELECT COUNT(*) FROM businesses"
-            count_params = []
-        
-        cursor.execute(count_query, count_params)
-        total = cursor.fetchone()["count"]
-        
-        cursor.close()
-        conn.close()
-        
-        return {
-            "success": True,
-            "access_level": "premium",
-            "query": q,
-            "total": total,
-            "count": len(results),
-            "page": page,
-            "leads": results
-        }
-        
-    except Exception as e:
-        logger.error(f"Premium search error: {e}")
         return {"success": False, "error": str(e)}
 
 # PUBLIC ADVANCED FILTERING
@@ -340,7 +216,7 @@ async def advanced_search(
         conditions = []
         params = []
         
-        # Build conditions based on provided filters
+        # Build conditions based on provided filters - ONLY SAFE COLUMNS
         filters = [
             ("PHYSICAL_ADDRESS_PROVINCE_OR_STATE", state),
             ("PHYSICAL_ADDRESS_CITY", city),
@@ -370,7 +246,7 @@ async def advanced_search(
         results = cursor.fetchall()
         
         # Execute count query
-        count_params = params[:-2]  # Remove limit and offset for count
+        count_params = params[:-2] if conditions else []  # Remove limit and offset for count
         cursor.execute(count_query, count_params)
         total = cursor.fetchone()["count"]
         
@@ -389,86 +265,6 @@ async def advanced_search(
         
     except Exception as e:
         logger.error(f"Advanced search error: {e}")
-        return {"success": False, "error": str(e)}
-
-# PREMIUM ADVANCED FILTERING
-@app.get("/leads/premium")
-async def advanced_search_premium(
-    state: str = Query(None, description="State code (e.g., CA, NY)"),
-    city: str = Query(None, description="City name"),
-    zip_code: str = Query(None, description="ZIP code"),
-    naics_code: str = Query(None, description="NAICS code"),
-    business_type: str = Query(None, description="Business type"),
-    entity_structure: str = Query(None, description="Entity structure"),
-    duns_id: str = Query(None, description="DUNS number"),
-    page: int = Query(1, ge=1),
-    limit: int = Query(50, ge=1, le=1000),
-    api_key: str = Depends(validate_api_key)
-):
-    """Advanced filtering with full contact information (Premium Tier)"""
-    try:
-        offset = (page - 1) * limit
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        premium_fields = get_premium_fields()
-        select_clause = ", ".join([f'"{field}"' for field in premium_fields])
-        
-        base_query = f"SELECT {select_clause} FROM businesses"
-        count_query = "SELECT COUNT(*) FROM businesses"
-        conditions = []
-        params = []
-        
-        # Build conditions including DUNS for premium
-        filters = [
-            ("PHYSICAL_ADDRESS_PROVINCE_OR_STATE", state),
-            ("PHYSICAL_ADDRESS_CITY", city),
-            ("PHYSICAL_ADDRESS_ZIPPOSTAL_CODE", zip_code),
-            ("PRIMARY_NAICS", naics_code),
-            ("BUS_TYPE_STRING", business_type),
-            ("ENTITY_STRUCTURE", entity_structure),
-            ("UNIQUE_ENTITY_IDENTIFIER_DUNS", duns_id)
-        ]
-        
-        for column, value in filters:
-            if value:
-                conditions.append(f'"{column}" ILIKE %s')
-                params.append(f"%{value}%")
-        
-        # Apply conditions if any
-        if conditions:
-            where_clause = " WHERE " + " AND ".join(conditions)
-            base_query += where_clause
-            count_query += where_clause
-        
-        # Add pagination
-        base_query += ' ORDER BY "LEGAL_BUSINESS_NAME" LIMIT %s OFFSET %s'
-        params.extend([limit, offset])
-        
-        # Execute main query
-        cursor.execute(base_query, params)
-        results = cursor.fetchall()
-        
-        # Execute count query
-        count_params = params[:-2]  # Remove limit and offset for count
-        cursor.execute(count_query, count_params)
-        total = cursor.fetchone()["count"]
-        
-        cursor.close()
-        conn.close()
-        
-        return {
-            "success": True,
-            "access_level": "premium",
-            "filters_applied": {k: v for k, v in locals().items() if v and k in ['state', 'city', 'zip_code', 'naics_code', 'business_type', 'entity_structure', 'duns_id']},
-            "total": total,
-            "count": len(results),
-            "page": page,
-            "leads": results
-        }
-        
-    except Exception as e:
-        logger.error(f"Premium advanced search error: {e}")
         return {"success": False, "error": str(e)}
 
 # PUBLIC BUSINESS DETAIL
@@ -495,100 +291,6 @@ async def get_business_detail(sam_id: str):
             
     except Exception as e:
         logger.error(f"Business detail error: {e}")
-        return {"success": False, "error": str(e)}
-
-# PREMIUM BUSINESS DETAIL
-@app.get("/business/{sam_id}/premium")
-async def get_business_detail_premium(sam_id: str, api_key: str = Depends(validate_api_key)):
-    """Get full business details including contact info by SAM ID (Premium Tier)"""
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        premium_fields = get_premium_fields()
-        select_clause = ", ".join([f'"{field}"' for field in premium_fields])
-        
-        cursor.execute(f'SELECT {select_clause} FROM businesses WHERE "UNIQUE_ENTITY_IDENTIFIER_SAM" = %s', (sam_id,))
-        result = cursor.fetchone()
-        
-        cursor.close()
-        conn.close()
-        
-        if result:
-            return {"success": True, "access_level": "premium", "business": dict(result)}
-        else:
-            raise HTTPException(status_code=404, detail="Business not found")
-            
-    except Exception as e:
-        logger.error(f"Premium business detail error: {e}")
-        return {"success": False, "error": str(e)}
-
-# CSV EXPORT (PREMIUM FEATURE)
-@app.get("/export/csv")
-async def export_businesses_csv(
-    state: str = Query(None),
-    city: str = Query(None),
-    naics_code: str = Query(None),
-    limit: int = Query(1000, le=10000),
-    api_key: str = Depends(validate_api_key)
-):
-    """Export business data as CSV (Premium Tier)"""
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        premium_fields = get_premium_fields()
-        select_clause = ", ".join([f'"{field}"' for field in premium_fields])
-        
-        base_query = f"SELECT {select_clause} FROM businesses"
-        conditions = []
-        params = []
-        
-        # Build conditions
-        filters = [
-            ("PHYSICAL_ADDRESS_PROVINCE_OR_STATE", state),
-            ("PHYSICAL_ADDRESS_CITY", city),
-            ("PRIMARY_NAICS", naics_code)
-        ]
-        
-        for column, value in filters:
-            if value:
-                conditions.append(f'"{column}" ILIKE %s')
-                params.append(f"%{value}%")
-        
-        if conditions:
-            where_clause = " WHERE " + " AND ".join(conditions)
-            base_query += where_clause
-        
-        base_query += ' ORDER BY "LEGAL_BUSINESS_NAME" LIMIT %s'
-        params.append(limit)
-        
-        cursor.execute(base_query, params)
-        results = cursor.fetchall()
-        
-        # Create CSV
-        output = StringIO()
-        if results:
-            columns = list(results[0].keys()) if results else []
-            writer = csv.DictWriter(output, fieldnames=columns)
-            writer.writeheader()
-            writer.writerows([dict(row) for row in results])
-        
-        csv_content = output.getvalue()
-        
-        cursor.close()
-        conn.close()
-        
-        return {
-            "success": True,
-            "filename": f"sam_businesses_export_{int(time.time())}.csv",
-            "content": csv_content,
-            "count": len(results),
-            "format": "csv"
-        }
-        
-    except Exception as e:
-        logger.error(f"Export error: {e}")
         return {"success": False, "error": str(e)}
 
 # STATISTICS ENDPOINT
@@ -623,16 +325,6 @@ async def get_statistics():
         """)
         top_naics = cursor.fetchall()
         
-        # Top cities
-        cursor.execute("""
-            SELECT "PHYSICAL_ADDRESS_CITY" as city, COUNT(*) as count 
-            FROM businesses 
-            WHERE "PHYSICAL_ADDRESS_CITY" IS NOT NULL 
-            GROUP BY "PHYSICAL_ADDRESS_CITY" 
-            ORDER BY count DESC LIMIT 10
-        """)
-        top_cities = cursor.fetchall()
-        
         cursor.close()
         conn.close()
         
@@ -641,13 +333,47 @@ async def get_statistics():
             "statistics": {
                 "total_businesses": total,
                 "top_states": top_states,
-                "top_naics_codes": top_naics,
-                "top_cities": top_cities
+                "top_naics_codes": top_naics
             }
         }
         
     except Exception as e:
         logger.error(f"Stats error: {e}")
+        return {"success": False, "error": str(e)}
+
+# DEBUG ENDPOINT - Discover actual schema
+@app.get("/debug/schema")
+async def debug_schema():
+    """Discover the actual column names in your database"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Get all column names from the businesses table
+        cursor.execute("""
+            SELECT column_name, data_type 
+            FROM information_schema.columns 
+            WHERE table_name = 'businesses' 
+            ORDER BY ordinal_position;
+        """)
+        
+        columns = cursor.fetchall()
+        
+        # Get sample data to verify column names
+        cursor.execute("SELECT * FROM businesses LIMIT 1")
+        sample_row = cursor.fetchone()
+        
+        cursor.close()
+        conn.close()
+        
+        return {
+            "success": True,
+            "total_columns": len(columns),
+            "columns": [dict(col) for col in columns],
+            "sample_row_columns": list(sample_row.keys()) if sample_row else []
+        }
+        
+    except Exception as e:
         return {"success": False, "error": str(e)}
 
 if __name__ == "__main__":
