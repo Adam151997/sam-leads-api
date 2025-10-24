@@ -13,7 +13,7 @@ import time
 app = FastAPI(
     title="SAM Leads API",
     description="Complete US Business Database with 1.4M+ Records - Search by any field",
-    version="5.0.2"
+    version="5.0.3"
 )
 
 app.add_middleware(
@@ -30,7 +30,6 @@ app.add_middleware(
 
 security = HTTPBearer()
 
-# Dictionary to store all valid API keys
 VALID_API_KEYS = {
     "demo_sam_key_123": {
         "plan": "premium", 
@@ -42,21 +41,10 @@ VALID_API_KEYS = {
 }
 
 def validate_api_key(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    """
-    Validate API key from the manual dictionary
-    This function is called automatically on premium endpoints
-    """
     api_key = credentials.credentials
-    
-    # Check if key exists and is active
     if api_key in VALID_API_KEYS and VALID_API_KEYS[api_key]["active"]:
         return api_key
-    
-    # If key is invalid
-    raise HTTPException(
-        status_code=401, 
-        detail="Invalid API key. Please check your key or contact support."
-    )
+    raise HTTPException(status_code=401, detail="Invalid API key.")
 
 @app.post("/admin/generate-key")
 async def generate_api_key(
@@ -65,21 +53,12 @@ async def generate_api_key(
     days_valid: int = Query(365, description="Days until key expires"),
     admin_secret: str = Query(..., description="Admin password for security")
 ):
-    """
-    Generate a new API key for a customer (MANUAL SYSTEM)
-    Only you should have access to this endpoint!
-    """
-    # IMPORTANT: Change this password to something secure!
     if admin_secret != "your_secure_admin_password_here_2024":
         raise HTTPException(status_code=401, detail="Invalid admin secret")
     
-    # Generate secure random API key
     new_key = f"sam_{secrets.token_urlsafe(24)}"
-    
-    # Calculate expiry date
     expiry_date = (datetime.datetime.now() + datetime.timedelta(days=days_valid)).strftime("%Y-%m-%d")
     
-    # Add to our manual dictionary
     VALID_API_KEYS[new_key] = {
         "plan": plan_type,
         "active": True,
@@ -95,53 +74,8 @@ async def generate_api_key(
         "customer": customer_name,
         "plan_type": plan_type,
         "expires_at": expiry_date,
-        "message": "API key generated successfully. Send this key to your customer."
+        "message": "API key generated successfully."
     }
-
-@app.get("/admin/keys")
-async def list_api_keys(admin_secret: str = Query(..., description="Admin password")):
-    """
-    List all API keys (for your admin use only)
-    """
-    if admin_secret != "your_secure_admin_password_here_2024":
-        raise HTTPException(status_code=401, detail="Invalid admin secret")
-    
-    keys_list = []
-    for api_key, details in VALID_API_KEYS.items():
-        keys_list.append({
-            "api_key": f"{api_key[:10]}...",  # Only show first 10 chars for security
-            "customer": details["customer"],
-            "plan": details["plan"],
-            "active": details["active"],
-            "created": details["created"],
-            "expires": details.get("expires", "Never"),
-            "notes": details.get("notes", "")
-        })
-    
-    return {
-        "total_keys": len(keys_list),
-        "active_keys": len([k for k in keys_list if k["active"]]),
-        "keys": keys_list
-    }
-
-@app.post("/admin/disable-key")
-async def disable_api_key(
-    api_key: str = Query(..., description="API key to disable"),
-    admin_secret: str = Query(..., description="Admin password")
-):
-    """
-    Disable an API key (if customer stops paying, etc.)
-    """
-    if admin_secret != "your_secure_admin_password_here_2024":
-        raise HTTPException(status_code=401, detail="Invalid admin secret")
-    
-    if api_key not in VALID_API_KEYS:
-        raise HTTPException(status_code=404, detail="API key not found")
-    
-    VALID_API_KEYS[api_key]["active"] = False
-    VALID_API_KEYS[api_key]["notes"] = f"Disabled on {datetime.datetime.now().strftime('%Y-%m-%d')}"
-    
-    return {"success": True, "message": f"API key disabled successfully"}
 
 # =============================================
 # DATABASE CONNECTION
@@ -154,12 +88,13 @@ def get_db_connection():
     return psycopg2.connect(database_url, cursor_factory=RealDictCursor)
 
 # =============================================
-# COLUMN DEFINITIONS - MATCHING YOUR EXACT SCHEMA
+# COLUMN DEFINITIONS - USING YOUR EXACT COLUMNS
 # =============================================
 
 def get_public_fields():
-    """Fields available to free users - using your exact column names"""
+    """Fields available to free users - using YOUR EXACT column names"""
     return [
+        "UNIQUE_ENTITY_IDENTIFIER_SAM",
         "LEGAL_BUSINESS_NAME", 
         "DBA_NAME", 
         "PHYSICAL_ADDRESS_CITY", 
@@ -167,48 +102,23 @@ def get_public_fields():
         "PHYSICAL_ADDRESS_ZIPPOSTAL_CODE",
         "PRIMARY_NAICS", 
         "BUS_TYPE_STRING", 
-        "ENTITY_STRUCTURE", 
-        "NAICS_SECTOR",
-        "PHYSICAL_ADDRESS_COUNTRY_CODE",
-        "UNIQUE_ENTITY_IDENTIFIER_SAM",
-        "FULL_ADDRESS"
+        "ENTITY_STRUCTURE"
     ]
 
 def get_premium_fields():
     """All fields including sensitive ones for premium users"""
-    return "*"  # All fields
-
-def get_sensitive_fields():
-    """Sensitive fields only available to premium users"""
-    return [
-        "UNIQUE_ENTITY_IDENTIFIER_DUNS",
-        "GOVT_BUS_POC_FIRST_NAME",
-        "GOVT_BUS_POC_LAST_NAME", 
-        "GOVT_BUS_POC_TITLE",
-        "ENTITY_URL",
-        "PHYSICAL_ADDRESS_LINE_1",
-        "PHYSICAL_ADDRESS_LINE_2",
-        "ENTITY_DIVISION_NAME",
-        "CAGE_CODE",
-        "PURPOSE_OF_REGISTRATION",
-        "REGISTRATION_EXPIRATION_DATE"
-    ]
+    return "*"
 
 @app.get("/")
 async def root():
     return {
         "message": "SAM Leads API - Complete Business Database",
-        "version": "5.0.2",
+        "version": "5.0.3",
         "records": "1.4M+ US Businesses",
         "access_tiers": {
             "public": "Basic business information",
             "premium": "Full contact details, DUNS numbers, export features (requires API key)"
         },
-        "searchable_fields": [
-            "business_name", "state", "city", "zip_code", "naics_code",
-            "duns_id", "dba_name", "country", "business_type", 
-            "entity_structure", "website", "naics_sector"
-        ],
         "endpoints": {
             "search": "/search?q=california",
             "search_premium": "/search/premium?q=california (requires API key)",
@@ -233,23 +143,19 @@ async def search_businesses(q: str = Query(None), page: int = Query(1, ge=1), li
         select_clause = ", ".join([f'"{field}"' for field in public_fields])
         
         if q:
-            # Search across multiple fields using your exact column names
+            # SIMPLIFIED SEARCH - Only using columns that DEFINITELY exist
             search_query = f"""
                 SELECT {select_clause} 
                 FROM businesses 
                 WHERE "LEGAL_BUSINESS_NAME" ILIKE %s 
                    OR "DBA_NAME" ILIKE %s 
                    OR "PHYSICAL_ADDRESS_CITY" ILIKE %s 
-                   OR "PHYSICAL_ADDRESS_PROVINCE_OR_STATE" ILIKE %s 
-                   OR "PHYSICAL_ADDRESS_ZIPPOSTAL_CODE" ILIKE %s 
-                   OR "PRIMARY_NAICS" ILIKE %s 
-                   OR "BUS_TYPE_STRING" ILIKE %s 
-                   OR "FULL_ADDRESS" ILIKE %s
+                   OR "PHYSICAL_ADDRESS_PROVINCE_OR_STATE" ILIKE %s
                 ORDER BY "LEGAL_BUSINESS_NAME" 
                 LIMIT %s OFFSET %s
             """
             search_pattern = f"%{q}%"
-            params = [search_pattern] * 8 + [limit, offset]
+            params = [search_pattern] * 4 + [limit, offset]
         else:
             search_query = f"""
                 SELECT {select_clause} 
@@ -269,13 +175,9 @@ async def search_businesses(q: str = Query(None), page: int = Query(1, ge=1), li
                 WHERE "LEGAL_BUSINESS_NAME" ILIKE %s 
                    OR "DBA_NAME" ILIKE %s 
                    OR "PHYSICAL_ADDRESS_CITY" ILIKE %s 
-                   OR "PHYSICAL_ADDRESS_PROVINCE_OR_STATE" ILIKE %s 
-                   OR "PHYSICAL_ADDRESS_ZIPPOSTAL_CODE" ILIKE %s 
-                   OR "PRIMARY_NAICS" ILIKE %s 
-                   OR "BUS_TYPE_STRING" ILIKE %s 
-                   OR "FULL_ADDRESS" ILIKE %s
+                   OR "PHYSICAL_ADDRESS_PROVINCE_OR_STATE" ILIKE %s
             """
-            count_params = [search_pattern] * 8
+            count_params = [search_pattern] * 4
         else:
             count_query = "SELECT COUNT(*) FROM businesses"
             count_params = []
@@ -319,18 +221,12 @@ async def search_businesses_premium(
                 WHERE "LEGAL_BUSINESS_NAME" ILIKE %s 
                    OR "DBA_NAME" ILIKE %s 
                    OR "PHYSICAL_ADDRESS_CITY" ILIKE %s 
-                   OR "PHYSICAL_ADDRESS_PROVINCE_OR_STATE" ILIKE %s 
-                   OR "PHYSICAL_ADDRESS_ZIPPOSTAL_CODE" ILIKE %s 
-                   OR "PRIMARY_NAICS" ILIKE %s 
-                   OR "BUS_TYPE_STRING" ILIKE %s 
-                   OR "FULL_ADDRESS" ILIKE %s
-                   OR "GOVT_BUS_POC_FIRST_NAME" ILIKE %s 
-                   OR "GOVT_BUS_POC_LAST_NAME" ILIKE %s
+                   OR "PHYSICAL_ADDRESS_PROVINCE_OR_STATE" ILIKE %s
                 ORDER BY "LEGAL_BUSINESS_NAME" 
                 LIMIT %s OFFSET %s
             """
             search_pattern = f"%{q}%"
-            params = [search_pattern] * 10 + [limit, offset]
+            params = [search_pattern] * 4 + [limit, offset]
         else:
             search_query = "SELECT * FROM businesses ORDER BY \"LEGAL_BUSINESS_NAME\" LIMIT %s OFFSET %s"
             params = [limit, offset]
@@ -345,15 +241,9 @@ async def search_businesses_premium(
                 WHERE "LEGAL_BUSINESS_NAME" ILIKE %s 
                    OR "DBA_NAME" ILIKE %s 
                    OR "PHYSICAL_ADDRESS_CITY" ILIKE %s 
-                   OR "PHYSICAL_ADDRESS_PROVINCE_OR_STATE" ILIKE %s 
-                   OR "PHYSICAL_ADDRESS_ZIPPOSTAL_CODE" ILIKE %s 
-                   OR "PRIMARY_NAICS" ILIKE %s 
-                   OR "BUS_TYPE_STRING" ILIKE %s 
-                   OR "FULL_ADDRESS" ILIKE %s
-                   OR "GOVT_BUS_POC_FIRST_NAME" ILIKE %s 
-                   OR "GOVT_BUS_POC_LAST_NAME" ILIKE %s
+                   OR "PHYSICAL_ADDRESS_PROVINCE_OR_STATE" ILIKE %s
             """
-            count_params = [search_pattern] * 10
+            count_params = [search_pattern] * 4
         else:
             count_query = "SELECT COUNT(*) FROM businesses"
             count_params = []
@@ -380,17 +270,11 @@ async def search_businesses_premium(
 # PUBLIC ADVANCED SEARCH - Basic fields only
 @app.get("/leads")
 async def advanced_search(
-    business_name: str = Query(None),
     state: str = Query(None),
     city: str = Query(None),
     zip_code: str = Query(None),
     naics_code: str = Query(None),
-    duns_id: str = Query(None),
-    dba_name: str = Query(None),
-    country: str = Query(None),
     business_type: str = Query(None),
-    entity_structure: str = Query(None),
-    naics_sector: str = Query(None),
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=1000)
 ):
@@ -406,26 +290,17 @@ async def advanced_search(
         conditions = []
         params = []
         
-        # Map frontend parameter names to your exact database column names
+        # SIMPLIFIED FILTERS - Only using columns that DEFINITELY exist
         filters = [
-            ("LEGAL_BUSINESS_NAME", business_name),
             ("PHYSICAL_ADDRESS_PROVINCE_OR_STATE", state),
             ("PHYSICAL_ADDRESS_CITY", city),
             ("PHYSICAL_ADDRESS_ZIPPOSTAL_CODE", zip_code),
             ("PRIMARY_NAICS", naics_code),
-            ("UNIQUE_ENTITY_IDENTIFIER_DUNS", duns_id),  # Premium field, but included for structure
-            ("DBA_NAME", dba_name),
-            ("PHYSICAL_ADDRESS_COUNTRY_CODE", country),
-            ("BUS_TYPE_STRING", business_type),
-            ("ENTITY_STRUCTURE", entity_structure),
-            ("NAICS_SECTOR", naics_sector)
+            ("BUS_TYPE_STRING", business_type)
         ]
         
         for column, value in filters:
             if value:
-                # Don't include DUNS in public search results
-                if column == "UNIQUE_ENTITY_IDENTIFIER_DUNS":
-                    continue
                 conditions.append(f"\"{column}\" ILIKE %s")
                 params.append(f"%{value}%")
         
@@ -440,7 +315,7 @@ async def advanced_search(
         cursor.execute(base_query, params)
         results = cursor.fetchall()
         
-        count_params = params[:-2]
+        count_params = params[:-2] if conditions else []
         cursor.execute(count_query, count_params)
         total = cursor.fetchone()["count"]
         
@@ -450,7 +325,7 @@ async def advanced_search(
         return {
             "success": True,
             "access_level": "public",
-            "filters_applied": {k: v for k, v in locals().items() if v and k in ['business_name', 'state', 'city', 'zip_code', 'naics_code', 'duns_id', 'dba_name', 'country', 'business_type', 'entity_structure', 'naics_sector']},
+            "filters_applied": {k: v for k, v in locals().items() if v and k in ['state', 'city', 'zip_code', 'naics_code', 'business_type']},
             "total": total,
             "count": len(results),
             "page": page,
@@ -463,17 +338,12 @@ async def advanced_search(
 # PREMIUM ADVANCED SEARCH - All fields including sensitive data
 @app.get("/leads/premium")
 async def advanced_search_premium(
-    business_name: str = Query(None),
     state: str = Query(None),
     city: str = Query(None),
     zip_code: str = Query(None),
     naics_code: str = Query(None),
     duns_id: str = Query(None),
-    dba_name: str = Query(None),
-    country: str = Query(None),
     business_type: str = Query(None),
-    entity_structure: str = Query(None),
-    naics_sector: str = Query(None),
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=1000),
     api_key: str = Depends(validate_api_key)
@@ -489,17 +359,12 @@ async def advanced_search_premium(
         params = []
         
         filters = [
-            ("LEGAL_BUSINESS_NAME", business_name),
             ("PHYSICAL_ADDRESS_PROVINCE_OR_STATE", state),
             ("PHYSICAL_ADDRESS_CITY", city),
             ("PHYSICAL_ADDRESS_ZIPPOSTAL_CODE", zip_code),
             ("PRIMARY_NAICS", naics_code),
             ("UNIQUE_ENTITY_IDENTIFIER_DUNS", duns_id),
-            ("DBA_NAME", dba_name),
-            ("PHYSICAL_ADDRESS_COUNTRY_CODE", country),
-            ("BUS_TYPE_STRING", business_type),
-            ("ENTITY_STRUCTURE", entity_structure),
-            ("NAICS_SECTOR", naics_sector)
+            ("BUS_TYPE_STRING", business_type)
         ]
         
         for column, value in filters:
@@ -518,7 +383,7 @@ async def advanced_search_premium(
         cursor.execute(base_query, params)
         results = cursor.fetchall()
         
-        count_params = params[:-2]
+        count_params = params[:-2] if conditions else []
         cursor.execute(count_query, count_params)
         total = cursor.fetchone()["count"]
         
@@ -528,7 +393,7 @@ async def advanced_search_premium(
         return {
             "success": True,
             "access_level": "premium",
-            "filters_applied": {k: v for k, v in locals().items() if v and k in ['business_name', 'state', 'city', 'zip_code', 'naics_code', 'duns_id', 'dba_name', 'country', 'business_type', 'entity_structure', 'naics_sector']},
+            "filters_applied": {k: v for k, v in locals().items() if v and k in ['state', 'city', 'zip_code', 'naics_code', 'duns_id', 'business_type']},
             "total": total,
             "count": len(results),
             "page": page,
@@ -578,90 +443,6 @@ async def get_business_detail_premium(sam_id: str, api_key: str = Depends(valida
             
     except Exception as e:
         return {"success": False, "error": str(e)}
-
-# CSV EXPORT - Premium feature only
-@app.get("/export/csv")
-async def export_businesses_csv(
-    q: str = Query(None, description="Search term"),
-    business_name: str = Query(None, description="Filter by business name"),
-    state: str = Query(None, description="Filter by state"),
-    city: str = Query(None, description="Filter by city"),
-    zip_code: str = Query(None, description="Filter by zip code"),
-    naics_code: str = Query(None, description="Filter by NAICS code"),
-    shuffle: str = Query("random", description="Shuffle method: random, alphabetical, state_city, newest"),
-    api_key: str = Depends(validate_api_key)
-):
-    """
-    Export businesses data as CSV (PREMIUM FEATURE - REQUIRES API KEY)
-    Returns full business details in CSV format with different results each time
-    """
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    try:
-        query = "SELECT * FROM businesses WHERE 1=1"
-        params = []
-        
-        if q:
-            query += """ AND ("LEGAL_BUSINESS_NAME" ILIKE %s OR "DBA_NAME" ILIKE %s OR "PHYSICAL_ADDRESS_CITY" ILIKE %s OR "PHYSICAL_ADDRESS_PROVINCE_OR_STATE" ILIKE %s OR "PHYSICAL_ADDRESS_ZIPPOSTAL_CODE" ILIKE %s OR "PRIMARY_NAICS" ILIKE %s OR "BUS_TYPE_STRING" ILIKE %s OR "FULL_ADDRESS" ILIKE %s OR "GOVT_BUS_POC_FIRST_NAME" ILIKE %s OR "GOVT_BUS_POC_LAST_NAME" ILIKE %s)"""
-            search_pattern = f"%{q}%"
-            params.extend([search_pattern] * 10)
-        
-        filters = [
-            ("LEGAL_BUSINESS_NAME", business_name),
-            ("PHYSICAL_ADDRESS_PROVINCE_OR_STATE", state),
-            ("PHYSICAL_ADDRESS_CITY", city),
-            ("PHYSICAL_ADDRESS_ZIPPOSTAL_CODE", zip_code),
-            ("PRIMARY_NAICS", naics_code)
-        ]
-        
-        for column, value in filters:
-            if value:
-                query += f' AND "{column}" ILIKE %s'
-                params.append(f"%{value}%")
-        
-        # SMART SHUFFLING - Different results each time
-        if shuffle == "random":
-            query += " ORDER BY RANDOM()"
-        elif shuffle == "alphabetical":
-            query += ' ORDER BY "LEGAL_BUSINESS_NAME"'
-        elif shuffle == "state_city":
-            query += ' ORDER BY "PHYSICAL_ADDRESS_PROVINCE_OR_STATE", "PHYSICAL_ADDRESS_CITY", "LEGAL_BUSINESS_NAME"'
-        elif shuffle == "newest":
-            query += ' ORDER BY "UNIQUE_ENTITY_IDENTIFIER_SAM" DESC'
-        else:
-            # Default: random with time-based seed for variety
-            random_seed = int(time.time()) % 1000
-            query += f" ORDER BY MD5(CONCAT(\"UNIQUE_ENTITY_IDENTIFIER_SAM\"::text, '{random_seed}'))"
-        
-        # Limit for safety
-        query += " LIMIT 10000"
-        
-        cursor.execute(query, params)
-        results = cursor.fetchall()
-        
-        # Create CSV
-        output = StringIO()
-        if results:
-            # Get all column names
-            columns = list(results[0].keys()) if results else []
-            writer = csv.DictWriter(output, fieldnames=columns)
-            writer.writeheader()
-            writer.writerows([dict(row) for row in results])
-        
-        csv_content = output.getvalue()
-        
-        return {
-            "filename": f"sam_businesses_export_{shuffle}_{int(time.time())}.csv",
-            "content": csv_content,
-            "count": len(results),
-            "format": "csv",
-            "shuffle_method": shuffle
-        }
-        
-    finally:
-        cursor.close()
-        conn.close()
 
 @app.get("/stats")
 async def get_statistics():
