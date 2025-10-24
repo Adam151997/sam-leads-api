@@ -13,7 +13,7 @@ import time
 app = FastAPI(
     title="SAM Leads API",
     description="Complete US Business Database with 1.4M+ Records - Search by any field",
-    version="5.0.0"
+    version="5.0.2"
 )
 
 app.add_middleware(
@@ -70,7 +70,7 @@ async def generate_api_key(
     Only you should have access to this endpoint!
     """
     # IMPORTANT: Change this password to something secure!
-    if admin_secret != "your_sam_admin_password_123":
+    if admin_secret != "your_secure_admin_password_here_2024":
         raise HTTPException(status_code=401, detail="Invalid admin secret")
     
     # Generate secure random API key
@@ -103,7 +103,7 @@ async def list_api_keys(admin_secret: str = Query(..., description="Admin passwo
     """
     List all API keys (for your admin use only)
     """
-    if admin_secret != "your_sam_admin_password_123":
+    if admin_secret != "your_secure_admin_password_here_2024":
         raise HTTPException(status_code=401, detail="Invalid admin secret")
     
     keys_list = []
@@ -132,7 +132,7 @@ async def disable_api_key(
     """
     Disable an API key (if customer stops paying, etc.)
     """
-    if admin_secret != "your_sam_admin_password_123":
+    if admin_secret != "your_secure_admin_password_here_2024":
         raise HTTPException(status_code=401, detail="Invalid admin secret")
     
     if api_key not in VALID_API_KEYS:
@@ -144,7 +144,7 @@ async def disable_api_key(
     return {"success": True, "message": f"API key disabled successfully"}
 
 # =============================================
-# EXISTING ENDPOINTS - NOW WITH PREMIUM FEATURES
+# DATABASE CONNECTION
 # =============================================
 
 def get_db_connection():
@@ -153,24 +153,52 @@ def get_db_connection():
         database_url += '?sslmode=require'
     return psycopg2.connect(database_url, cursor_factory=RealDictCursor)
 
+# =============================================
+# COLUMN DEFINITIONS - MATCHING YOUR EXACT SCHEMA
+# =============================================
+
 def get_public_fields():
-    """Fields available to free users"""
+    """Fields available to free users - using your exact column names"""
     return [
-        "LEGAL_BUSINESS_NAME", "DBA_NAME", "PHYSICAL_ADDRESS_CITY", 
-        "PHYSICAL_ADDRESS_PROVINCE_OR_STATE", "PHYSICAL_ADDRESS_ZIPPOSTAL_CODE",
-        "PRIMARY_NAICS", "BUS_TYPE_STRING", "ENTITY_STRUCTURE", "NAICS_SECTOR",
-        "PHYSICAL_ADDRESS_COUNTRY_CODE"
+        "LEGAL_BUSINESS_NAME", 
+        "DBA_NAME", 
+        "PHYSICAL_ADDRESS_CITY", 
+        "PHYSICAL_ADDRESS_PROVINCE_OR_STATE", 
+        "PHYSICAL_ADDRESS_ZIPPOSTAL_CODE",
+        "PRIMARY_NAICS", 
+        "BUS_TYPE_STRING", 
+        "ENTITY_STRUCTURE", 
+        "NAICS_SECTOR",
+        "PHYSICAL_ADDRESS_COUNTRY_CODE",
+        "UNIQUE_ENTITY_IDENTIFIER_SAM",
+        "FULL_ADDRESS"
     ]
 
 def get_premium_fields():
     """All fields including sensitive ones for premium users"""
     return "*"  # All fields
 
+def get_sensitive_fields():
+    """Sensitive fields only available to premium users"""
+    return [
+        "UNIQUE_ENTITY_IDENTIFIER_DUNS",
+        "GOVT_BUS_POC_FIRST_NAME",
+        "GOVT_BUS_POC_LAST_NAME", 
+        "GOVT_BUS_POC_TITLE",
+        "ENTITY_URL",
+        "PHYSICAL_ADDRESS_LINE_1",
+        "PHYSICAL_ADDRESS_LINE_2",
+        "ENTITY_DIVISION_NAME",
+        "CAGE_CODE",
+        "PURPOSE_OF_REGISTRATION",
+        "REGISTRATION_EXPIRATION_DATE"
+    ]
+
 @app.get("/")
 async def root():
     return {
         "message": "SAM Leads API - Complete Business Database",
-        "version": "5.0.0",
+        "version": "5.0.2",
         "records": "1.4M+ US Businesses",
         "access_tiers": {
             "public": "Basic business information",
@@ -178,8 +206,8 @@ async def root():
         },
         "searchable_fields": [
             "business_name", "state", "city", "zip_code", "naics_code",
-            "duns_id", "dba_name", "address", "country", "poc_name",
-            "business_type", "entity_structure", "website", "naics_sector"
+            "duns_id", "dba_name", "country", "business_type", 
+            "entity_structure", "website", "naics_sector"
         ],
         "endpoints": {
             "search": "/search?q=california",
@@ -201,23 +229,53 @@ async def search_businesses(q: str = Query(None), page: int = Query(1, ge=1), li
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        public_fields = ", ".join([f'"{field}"' for field in get_public_fields()])
+        public_fields = get_public_fields()
+        select_clause = ", ".join([f'"{field}"' for field in public_fields])
         
         if q:
-            # FIXED: Use single quotes for SQL string, proper escaping
-            search_query = f"""SELECT {public_fields} FROM businesses WHERE "LEGAL_BUSINESS_NAME" ILIKE %s OR "DBA_NAME" ILIKE %s OR "PHYSICAL_ADDRESS_CITY" ILIKE %s OR "PHYSICAL_ADDRESS_PROVINCE_OR_STATE" ILIKE %s OR "PHYSICAL_ADDRESS_ZIPPOSTAL_CODE" ILIKE %s OR "PRIMARY_NAICS" ILIKE %s OR "BUS_TYPE_STRING" ILIKE %s OR "FULL_ADDRESS" ILIKE %s OR "GOVT_BUS_POC_FIRST_NAME" ILIKE %s OR "GOVT_BUS_POC_LAST_NAME" ILIKE %s ORDER BY "LEGAL_BUSINESS_NAME" LIMIT %s OFFSET %s"""
+            # Search across multiple fields using your exact column names
+            search_query = f"""
+                SELECT {select_clause} 
+                FROM businesses 
+                WHERE "LEGAL_BUSINESS_NAME" ILIKE %s 
+                   OR "DBA_NAME" ILIKE %s 
+                   OR "PHYSICAL_ADDRESS_CITY" ILIKE %s 
+                   OR "PHYSICAL_ADDRESS_PROVINCE_OR_STATE" ILIKE %s 
+                   OR "PHYSICAL_ADDRESS_ZIPPOSTAL_CODE" ILIKE %s 
+                   OR "PRIMARY_NAICS" ILIKE %s 
+                   OR "BUS_TYPE_STRING" ILIKE %s 
+                   OR "FULL_ADDRESS" ILIKE %s
+                ORDER BY "LEGAL_BUSINESS_NAME" 
+                LIMIT %s OFFSET %s
+            """
             search_pattern = f"%{q}%"
-            params = [search_pattern] * 10 + [limit, offset]
+            params = [search_pattern] * 8 + [limit, offset]
         else:
-            search_query = f"""SELECT {public_fields} FROM businesses ORDER BY "LEGAL_BUSINESS_NAME" LIMIT %s OFFSET %s"""
+            search_query = f"""
+                SELECT {select_clause} 
+                FROM businesses 
+                ORDER BY "LEGAL_BUSINESS_NAME" 
+                LIMIT %s OFFSET %s
+            """
             params = [limit, offset]
         
         cursor.execute(search_query, params)
         results = cursor.fetchall()
         
         if q:
-            count_query = """SELECT COUNT(*) FROM businesses WHERE "LEGAL_BUSINESS_NAME" ILIKE %s OR "DBA_NAME" ILIKE %s OR "PHYSICAL_ADDRESS_CITY" ILIKE %s OR "PHYSICAL_ADDRESS_PROVINCE_OR_STATE" ILIKE %s OR "PHYSICAL_ADDRESS_ZIPPOSTAL_CODE" ILIKE %s OR "PRIMARY_NAICS" ILIKE %s OR "BUS_TYPE_STRING" ILIKE %s OR "FULL_ADDRESS" ILIKE %s OR "GOVT_BUS_POC_FIRST_NAME" ILIKE %s OR "GOVT_BUS_POC_LAST_NAME" ILIKE %s"""
-            count_params = [search_pattern] * 10
+            count_query = """
+                SELECT COUNT(*) 
+                FROM businesses 
+                WHERE "LEGAL_BUSINESS_NAME" ILIKE %s 
+                   OR "DBA_NAME" ILIKE %s 
+                   OR "PHYSICAL_ADDRESS_CITY" ILIKE %s 
+                   OR "PHYSICAL_ADDRESS_PROVINCE_OR_STATE" ILIKE %s 
+                   OR "PHYSICAL_ADDRESS_ZIPPOSTAL_CODE" ILIKE %s 
+                   OR "PRIMARY_NAICS" ILIKE %s 
+                   OR "BUS_TYPE_STRING" ILIKE %s 
+                   OR "FULL_ADDRESS" ILIKE %s
+            """
+            count_params = [search_pattern] * 8
         else:
             count_query = "SELECT COUNT(*) FROM businesses"
             count_params = []
@@ -255,18 +313,46 @@ async def search_businesses_premium(
         cursor = conn.cursor()
         
         if q:
-            search_query = """SELECT * FROM businesses WHERE "LEGAL_BUSINESS_NAME" ILIKE %s OR "DBA_NAME" ILIKE %s OR "PHYSICAL_ADDRESS_CITY" ILIKE %s OR "PHYSICAL_ADDRESS_PROVINCE_OR_STATE" ILIKE %s OR "PHYSICAL_ADDRESS_ZIPPOSTAL_CODE" ILIKE %s OR "PRIMARY_NAICS" ILIKE %s OR "BUS_TYPE_STRING" ILIKE %s OR "FULL_ADDRESS" ILIKE %s OR "GOVT_BUS_POC_FIRST_NAME" ILIKE %s OR "GOVT_BUS_POC_LAST_NAME" ILIKE %s ORDER BY "LEGAL_BUSINESS_NAME" LIMIT %s OFFSET %s"""
+            search_query = """
+                SELECT * 
+                FROM businesses 
+                WHERE "LEGAL_BUSINESS_NAME" ILIKE %s 
+                   OR "DBA_NAME" ILIKE %s 
+                   OR "PHYSICAL_ADDRESS_CITY" ILIKE %s 
+                   OR "PHYSICAL_ADDRESS_PROVINCE_OR_STATE" ILIKE %s 
+                   OR "PHYSICAL_ADDRESS_ZIPPOSTAL_CODE" ILIKE %s 
+                   OR "PRIMARY_NAICS" ILIKE %s 
+                   OR "BUS_TYPE_STRING" ILIKE %s 
+                   OR "FULL_ADDRESS" ILIKE %s
+                   OR "GOVT_BUS_POC_FIRST_NAME" ILIKE %s 
+                   OR "GOVT_BUS_POC_LAST_NAME" ILIKE %s
+                ORDER BY "LEGAL_BUSINESS_NAME" 
+                LIMIT %s OFFSET %s
+            """
             search_pattern = f"%{q}%"
             params = [search_pattern] * 10 + [limit, offset]
         else:
-            search_query = """SELECT * FROM businesses ORDER BY "LEGAL_BUSINESS_NAME" LIMIT %s OFFSET %s"""
+            search_query = "SELECT * FROM businesses ORDER BY \"LEGAL_BUSINESS_NAME\" LIMIT %s OFFSET %s"
             params = [limit, offset]
         
         cursor.execute(search_query, params)
         results = cursor.fetchall()
         
         if q:
-            count_query = """SELECT COUNT(*) FROM businesses WHERE "LEGAL_BUSINESS_NAME" ILIKE %s OR "DBA_NAME" ILIKE %s OR "PHYSICAL_ADDRESS_CITY" ILIKE %s OR "PHYSICAL_ADDRESS_PROVINCE_OR_STATE" ILIKE %s OR "PHYSICAL_ADDRESS_ZIPPOSTAL_CODE" ILIKE %s OR "PRIMARY_NAICS" ILIKE %s OR "BUS_TYPE_STRING" ILIKE %s OR "FULL_ADDRESS" ILIKE %s OR "GOVT_BUS_POC_FIRST_NAME" ILIKE %s OR "GOVT_BUS_POC_LAST_NAME" ILIKE %s"""
+            count_query = """
+                SELECT COUNT(*) 
+                FROM businesses 
+                WHERE "LEGAL_BUSINESS_NAME" ILIKE %s 
+                   OR "DBA_NAME" ILIKE %s 
+                   OR "PHYSICAL_ADDRESS_CITY" ILIKE %s 
+                   OR "PHYSICAL_ADDRESS_PROVINCE_OR_STATE" ILIKE %s 
+                   OR "PHYSICAL_ADDRESS_ZIPPOSTAL_CODE" ILIKE %s 
+                   OR "PRIMARY_NAICS" ILIKE %s 
+                   OR "BUS_TYPE_STRING" ILIKE %s 
+                   OR "FULL_ADDRESS" ILIKE %s
+                   OR "GOVT_BUS_POC_FIRST_NAME" ILIKE %s 
+                   OR "GOVT_BUS_POC_LAST_NAME" ILIKE %s
+            """
             count_params = [search_pattern] * 10
         else:
             count_query = "SELECT COUNT(*) FROM businesses"
@@ -313,19 +399,21 @@ async def advanced_search(
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        public_fields = ", ".join([f'"{field}"' for field in get_public_fields()])
-        base_query = f"SELECT {public_fields} FROM businesses"
+        public_fields = get_public_fields()
+        select_clause = ", ".join([f'"{field}"' for field in public_fields])
+        base_query = f"SELECT {select_clause} FROM businesses"
         count_query = "SELECT COUNT(*) FROM businesses"
         conditions = []
         params = []
         
+        # Map frontend parameter names to your exact database column names
         filters = [
             ("LEGAL_BUSINESS_NAME", business_name),
             ("PHYSICAL_ADDRESS_PROVINCE_OR_STATE", state),
             ("PHYSICAL_ADDRESS_CITY", city),
             ("PHYSICAL_ADDRESS_ZIPPOSTAL_CODE", zip_code),
             ("PRIMARY_NAICS", naics_code),
-            ("UNIQUE_ENTITY_IDENTIFIER_DUNS", duns_id),
+            ("UNIQUE_ENTITY_IDENTIFIER_DUNS", duns_id),  # Premium field, but included for structure
             ("DBA_NAME", dba_name),
             ("PHYSICAL_ADDRESS_COUNTRY_CODE", country),
             ("BUS_TYPE_STRING", business_type),
@@ -335,7 +423,10 @@ async def advanced_search(
         
         for column, value in filters:
             if value:
-                conditions.append(f'"{column}" ILIKE %s')
+                # Don't include DUNS in public search results
+                if column == "UNIQUE_ENTITY_IDENTIFIER_DUNS":
+                    continue
+                conditions.append(f"\"{column}\" ILIKE %s")
                 params.append(f"%{value}%")
         
         if conditions:
@@ -343,7 +434,7 @@ async def advanced_search(
             base_query += where_clause
             count_query += where_clause
         
-        base_query += ' ORDER BY "LEGAL_BUSINESS_NAME" LIMIT %s OFFSET %s'
+        base_query += " ORDER BY \"LEGAL_BUSINESS_NAME\" LIMIT %s OFFSET %s"
         params.extend([limit, offset])
         
         cursor.execute(base_query, params)
@@ -413,7 +504,7 @@ async def advanced_search_premium(
         
         for column, value in filters:
             if value:
-                conditions.append(f'"{column}" ILIKE %s')
+                conditions.append(f"\"{column}\" ILIKE %s")
                 params.append(f"%{value}%")
         
         if conditions:
@@ -421,7 +512,7 @@ async def advanced_search_premium(
             base_query += where_clause
             count_query += where_clause
         
-        base_query += ' ORDER BY "LEGAL_BUSINESS_NAME" LIMIT %s OFFSET %s'
+        base_query += " ORDER BY \"LEGAL_BUSINESS_NAME\" LIMIT %s OFFSET %s"
         params.extend([limit, offset])
         
         cursor.execute(base_query, params)
@@ -454,8 +545,9 @@ async def get_business_detail(sam_id: str):
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        public_fields = ", ".join([f'"{field}"' for field in get_public_fields()])
-        cursor.execute(f'SELECT {public_fields} FROM businesses WHERE "UNIQUE_ENTITY_IDENTIFIER_SAM" = %s', (sam_id,))
+        public_fields = get_public_fields()
+        select_clause = ", ".join([f'"{field}"' for field in public_fields])
+        cursor.execute(f'SELECT {select_clause} FROM businesses WHERE "UNIQUE_ENTITY_IDENTIFIER_SAM" = %s', (sam_id,))
         result = cursor.fetchone()
         cursor.close()
         conn.close()
