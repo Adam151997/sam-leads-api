@@ -204,18 +204,19 @@ async def search_businesses(q: str = Query(None), page: int = Query(1, ge=1), li
         public_fields = ", ".join([f'"{field}"' for field in get_public_fields()])
         
         if q:
-            search_query = f"SELECT {public_fields} FROM businesses WHERE "LEGAL_BUSINESS_NAME" ILIKE %s OR "DBA_NAME" ILIKE %s OR "PHYSICAL_ADDRESS_CITY" ILIKE %s OR "PHYSICAL_ADDRESS_PROVINCE_OR_STATE" ILIKE %s OR "PHYSICAL_ADDRESS_ZIPPOSTAL_CODE" ILIKE %s OR "PRIMARY_NAICS" ILIKE %s OR "BUS_TYPE_STRING" ILIKE %s OR "FULL_ADDRESS" ILIKE %s OR "GOVT_BUS_POC_FIRST_NAME" ILIKE %s OR "GOVT_BUS_POC_LAST_NAME" ILIKE %s ORDER BY "LEGAL_BUSINESS_NAME" LIMIT %s OFFSET %s"
+            # FIXED: Use single quotes for SQL string, proper escaping
+            search_query = f"""SELECT {public_fields} FROM businesses WHERE "LEGAL_BUSINESS_NAME" ILIKE %s OR "DBA_NAME" ILIKE %s OR "PHYSICAL_ADDRESS_CITY" ILIKE %s OR "PHYSICAL_ADDRESS_PROVINCE_OR_STATE" ILIKE %s OR "PHYSICAL_ADDRESS_ZIPPOSTAL_CODE" ILIKE %s OR "PRIMARY_NAICS" ILIKE %s OR "BUS_TYPE_STRING" ILIKE %s OR "FULL_ADDRESS" ILIKE %s OR "GOVT_BUS_POC_FIRST_NAME" ILIKE %s OR "GOVT_BUS_POC_LAST_NAME" ILIKE %s ORDER BY "LEGAL_BUSINESS_NAME" LIMIT %s OFFSET %s"""
             search_pattern = f"%{q}%"
             params = [search_pattern] * 10 + [limit, offset]
         else:
-            search_query = f"SELECT {public_fields} FROM businesses ORDER BY "LEGAL_BUSINESS_NAME" LIMIT %s OFFSET %s"
+            search_query = f"""SELECT {public_fields} FROM businesses ORDER BY "LEGAL_BUSINESS_NAME" LIMIT %s OFFSET %s"""
             params = [limit, offset]
         
         cursor.execute(search_query, params)
         results = cursor.fetchall()
         
         if q:
-            count_query = "SELECT COUNT(*) FROM businesses WHERE "LEGAL_BUSINESS_NAME" ILIKE %s OR "DBA_NAME" ILIKE %s OR "PHYSICAL_ADDRESS_CITY" ILIKE %s OR "PHYSICAL_ADDRESS_PROVINCE_OR_STATE" ILIKE %s OR "PHYSICAL_ADDRESS_ZIPPOSTAL_CODE" ILIKE %s OR "PRIMARY_NAICS" ILIKE %s OR "BUS_TYPE_STRING" ILIKE %s OR "FULL_ADDRESS" ILIKE %s OR "GOVT_BUS_POC_FIRST_NAME" ILIKE %s OR "GOVT_BUS_POC_LAST_NAME" ILIKE %s"
+            count_query = """SELECT COUNT(*) FROM businesses WHERE "LEGAL_BUSINESS_NAME" ILIKE %s OR "DBA_NAME" ILIKE %s OR "PHYSICAL_ADDRESS_CITY" ILIKE %s OR "PHYSICAL_ADDRESS_PROVINCE_OR_STATE" ILIKE %s OR "PHYSICAL_ADDRESS_ZIPPOSTAL_CODE" ILIKE %s OR "PRIMARY_NAICS" ILIKE %s OR "BUS_TYPE_STRING" ILIKE %s OR "FULL_ADDRESS" ILIKE %s OR "GOVT_BUS_POC_FIRST_NAME" ILIKE %s OR "GOVT_BUS_POC_LAST_NAME" ILIKE %s"""
             count_params = [search_pattern] * 10
         else:
             count_query = "SELECT COUNT(*) FROM businesses"
@@ -254,18 +255,18 @@ async def search_businesses_premium(
         cursor = conn.cursor()
         
         if q:
-            search_query = "SELECT * FROM businesses WHERE "LEGAL_BUSINESS_NAME" ILIKE %s OR "DBA_NAME" ILIKE %s OR "PHYSICAL_ADDRESS_CITY" ILIKE %s OR "PHYSICAL_ADDRESS_PROVINCE_OR_STATE" ILIKE %s OR "PHYSICAL_ADDRESS_ZIPPOSTAL_CODE" ILIKE %s OR "PRIMARY_NAICS" ILIKE %s OR "BUS_TYPE_STRING" ILIKE %s OR "FULL_ADDRESS" ILIKE %s OR "GOVT_BUS_POC_FIRST_NAME" ILIKE %s OR "GOVT_BUS_POC_LAST_NAME" ILIKE %s ORDER BY "LEGAL_BUSINESS_NAME" LIMIT %s OFFSET %s"
+            search_query = """SELECT * FROM businesses WHERE "LEGAL_BUSINESS_NAME" ILIKE %s OR "DBA_NAME" ILIKE %s OR "PHYSICAL_ADDRESS_CITY" ILIKE %s OR "PHYSICAL_ADDRESS_PROVINCE_OR_STATE" ILIKE %s OR "PHYSICAL_ADDRESS_ZIPPOSTAL_CODE" ILIKE %s OR "PRIMARY_NAICS" ILIKE %s OR "BUS_TYPE_STRING" ILIKE %s OR "FULL_ADDRESS" ILIKE %s OR "GOVT_BUS_POC_FIRST_NAME" ILIKE %s OR "GOVT_BUS_POC_LAST_NAME" ILIKE %s ORDER BY "LEGAL_BUSINESS_NAME" LIMIT %s OFFSET %s"""
             search_pattern = f"%{q}%"
             params = [search_pattern] * 10 + [limit, offset]
         else:
-            search_query = "SELECT * FROM businesses ORDER BY "LEGAL_BUSINESS_NAME" LIMIT %s OFFSET %s"
+            search_query = """SELECT * FROM businesses ORDER BY "LEGAL_BUSINESS_NAME" LIMIT %s OFFSET %s"""
             params = [limit, offset]
         
         cursor.execute(search_query, params)
         results = cursor.fetchall()
         
         if q:
-            count_query = "SELECT COUNT(*) FROM businesses WHERE "LEGAL_BUSINESS_NAME" ILIKE %s OR "DBA_NAME" ILIKE %s OR "PHYSICAL_ADDRESS_CITY" ILIKE %s OR "PHYSICAL_ADDRESS_PROVINCE_OR_STATE" ILIKE %s OR "PHYSICAL_ADDRESS_ZIPPOSTAL_CODE" ILIKE %s OR "PRIMARY_NAICS" ILIKE %s OR "BUS_TYPE_STRING" ILIKE %s OR "FULL_ADDRESS" ILIKE %s OR "GOVT_BUS_POC_FIRST_NAME" ILIKE %s OR "GOVT_BUS_POC_LAST_NAME" ILIKE %s"
+            count_query = """SELECT COUNT(*) FROM businesses WHERE "LEGAL_BUSINESS_NAME" ILIKE %s OR "DBA_NAME" ILIKE %s OR "PHYSICAL_ADDRESS_CITY" ILIKE %s OR "PHYSICAL_ADDRESS_PROVINCE_OR_STATE" ILIKE %s OR "PHYSICAL_ADDRESS_ZIPPOSTAL_CODE" ILIKE %s OR "PRIMARY_NAICS" ILIKE %s OR "BUS_TYPE_STRING" ILIKE %s OR "FULL_ADDRESS" ILIKE %s OR "GOVT_BUS_POC_FIRST_NAME" ILIKE %s OR "GOVT_BUS_POC_LAST_NAME" ILIKE %s"""
             count_params = [search_pattern] * 10
         else:
             count_query = "SELECT COUNT(*) FROM businesses"
@@ -334,7 +335,7 @@ async def advanced_search(
         
         for column, value in filters:
             if value:
-                conditions.append(f""{column}" ILIKE %s")
+                conditions.append(f'"{column}" ILIKE %s')
                 params.append(f"%{value}%")
         
         if conditions:
@@ -342,7 +343,7 @@ async def advanced_search(
             base_query += where_clause
             count_query += where_clause
         
-        base_query += " ORDER BY "LEGAL_BUSINESS_NAME" LIMIT %s OFFSET %s"
+        base_query += ' ORDER BY "LEGAL_BUSINESS_NAME" LIMIT %s OFFSET %s'
         params.extend([limit, offset])
         
         cursor.execute(base_query, params)
@@ -412,7 +413,7 @@ async def advanced_search_premium(
         
         for column, value in filters:
             if value:
-                conditions.append(f""{column}" ILIKE %s")
+                conditions.append(f'"{column}" ILIKE %s')
                 params.append(f"%{value}%")
         
         if conditions:
@@ -420,7 +421,7 @@ async def advanced_search_premium(
             base_query += where_clause
             count_query += where_clause
         
-        base_query += " ORDER BY "LEGAL_BUSINESS_NAME" LIMIT %s OFFSET %s"
+        base_query += ' ORDER BY "LEGAL_BUSINESS_NAME" LIMIT %s OFFSET %s'
         params.extend([limit, offset])
         
         cursor.execute(base_query, params)
@@ -510,7 +511,7 @@ async def export_businesses_csv(
         params = []
         
         if q:
-            query += " AND ("LEGAL_BUSINESS_NAME" ILIKE %s OR "DBA_NAME" ILIKE %s OR "PHYSICAL_ADDRESS_CITY" ILIKE %s OR "PHYSICAL_ADDRESS_PROVINCE_OR_STATE" ILIKE %s OR "PHYSICAL_ADDRESS_ZIPPOSTAL_CODE" ILIKE %s OR "PRIMARY_NAICS" ILIKE %s OR "BUS_TYPE_STRING" ILIKE %s OR "FULL_ADDRESS" ILIKE %s OR "GOVT_BUS_POC_FIRST_NAME" ILIKE %s OR "GOVT_BUS_POC_LAST_NAME" ILIKE %s)"
+            query += """ AND ("LEGAL_BUSINESS_NAME" ILIKE %s OR "DBA_NAME" ILIKE %s OR "PHYSICAL_ADDRESS_CITY" ILIKE %s OR "PHYSICAL_ADDRESS_PROVINCE_OR_STATE" ILIKE %s OR "PHYSICAL_ADDRESS_ZIPPOSTAL_CODE" ILIKE %s OR "PRIMARY_NAICS" ILIKE %s OR "BUS_TYPE_STRING" ILIKE %s OR "FULL_ADDRESS" ILIKE %s OR "GOVT_BUS_POC_FIRST_NAME" ILIKE %s OR "GOVT_BUS_POC_LAST_NAME" ILIKE %s)"""
             search_pattern = f"%{q}%"
             params.extend([search_pattern] * 10)
         
@@ -524,22 +525,22 @@ async def export_businesses_csv(
         
         for column, value in filters:
             if value:
-                query += f" AND "{column}" ILIKE %s"
+                query += f' AND "{column}" ILIKE %s'
                 params.append(f"%{value}%")
         
         # SMART SHUFFLING - Different results each time
         if shuffle == "random":
             query += " ORDER BY RANDOM()"
         elif shuffle == "alphabetical":
-            query += " ORDER BY "LEGAL_BUSINESS_NAME""
+            query += ' ORDER BY "LEGAL_BUSINESS_NAME"'
         elif shuffle == "state_city":
-            query += " ORDER BY "PHYSICAL_ADDRESS_PROVINCE_OR_STATE", "PHYSICAL_ADDRESS_CITY", "LEGAL_BUSINESS_NAME""
+            query += ' ORDER BY "PHYSICAL_ADDRESS_PROVINCE_OR_STATE", "PHYSICAL_ADDRESS_CITY", "LEGAL_BUSINESS_NAME"'
         elif shuffle == "newest":
-            query += " ORDER BY "UNIQUE_ENTITY_IDENTIFIER_SAM" DESC"
+            query += ' ORDER BY "UNIQUE_ENTITY_IDENTIFIER_SAM" DESC'
         else:
             # Default: random with time-based seed for variety
             random_seed = int(time.time()) % 1000
-            query += f" ORDER BY MD5(CONCAT("UNIQUE_ENTITY_IDENTIFIER_SAM"::text, '{random_seed}'))"
+            query += f" ORDER BY MD5(CONCAT(\"UNIQUE_ENTITY_IDENTIFIER_SAM\"::text, '{random_seed}'))"
         
         # Limit for safety
         query += " LIMIT 10000"
@@ -579,13 +580,13 @@ async def get_statistics():
         cursor.execute("SELECT COUNT(*) as total FROM businesses")
         total = cursor.fetchone()["total"]
         
-        cursor.execute("SELECT "PHYSICAL_ADDRESS_PROVINCE_OR_STATE" as state, COUNT(*) as count FROM businesses WHERE "PHYSICAL_ADDRESS_PROVINCE_OR_STATE" IS NOT NULL GROUP BY "PHYSICAL_ADDRESS_PROVINCE_OR_STATE" ORDER BY count DESC LIMIT 10")
+        cursor.execute("""SELECT "PHYSICAL_ADDRESS_PROVINCE_OR_STATE" as state, COUNT(*) as count FROM businesses WHERE "PHYSICAL_ADDRESS_PROVINCE_OR_STATE" IS NOT NULL GROUP BY "PHYSICAL_ADDRESS_PROVINCE_OR_STATE" ORDER BY count DESC LIMIT 10""")
         top_states = cursor.fetchall()
         
-        cursor.execute("SELECT "PRIMARY_NAICS" as naics, COUNT(*) as count FROM businesses WHERE "PRIMARY_NAICS" IS NOT NULL GROUP BY "PRIMARY_NAICS" ORDER BY count DESC LIMIT 10")
+        cursor.execute("""SELECT "PRIMARY_NAICS" as naics, COUNT(*) as count FROM businesses WHERE "PRIMARY_NAICS" IS NOT NULL GROUP BY "PRIMARY_NAICS" ORDER BY count DESC LIMIT 10""")
         top_naics = cursor.fetchall()
         
-        cursor.execute("SELECT "PHYSICAL_ADDRESS_CITY" as city, COUNT(*) as count FROM businesses WHERE "PHYSICAL_ADDRESS_CITY" IS NOT NULL GROUP BY "PHYSICAL_ADDRESS_CITY" ORDER BY count DESC LIMIT 10")
+        cursor.execute("""SELECT "PHYSICAL_ADDRESS_CITY" as city, COUNT(*) as count FROM businesses WHERE "PHYSICAL_ADDRESS_CITY" IS NOT NULL GROUP BY "PHYSICAL_ADDRESS_CITY" ORDER BY count DESC LIMIT 10""")
         top_cities = cursor.fetchall()
         
         cursor.close()
